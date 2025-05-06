@@ -1,0 +1,5 @@
+boto3
+pandas
+imbalanced-learn
+sagemaker
+scikit-learn  # need for imbalanced-learn
