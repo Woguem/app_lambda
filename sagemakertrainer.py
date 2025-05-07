@@ -133,7 +133,7 @@ def lambda_handler(event, context):
             "eta": "0.2",
             "subsample": "0.8",
             "objective": "multi:softmax",
-            "num_class": "4",
+            "num_class": "3",
             "num_round": "100",
             "eval_metric": "mlogloss"
         },

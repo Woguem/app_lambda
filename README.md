@@ -19,6 +19,7 @@ This repository contains a Dockerized AWS Lambda function that automates machine
 The Lambda function runs inside a Docker container, enabling custom dependencies and runtime environments.
 
 📁 Structure
+
     1- Dockerfile: Builds the Lambda container.
 
     2- lambda_function.py: Main logic for data prep, training, and deployment.
