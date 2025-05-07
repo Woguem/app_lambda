@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 import io
 from imblearn.over_sampling import SMOTE
-
+from time import sleep
 from sagemaker import image_uris
 
 
@@ -139,8 +139,126 @@ def lambda_handler(event, context):
         },
     )
     
-    return {
-        'statusCode': 200,
-        'body': json.dumps(f'Started training job: {job_name}')
-    }
+    # Wait for training job to complete
+    try:
+        print(f"Waiting for training job {job_name} to complete...")
+        waiter = sagemaker.get_waiter('training_job_completed_or_stopped')
+        waiter.wait(TrainingJobName=job_name)
+        
+        # Describe the training job to get the model artifacts
+        training_job_info = sagemaker.describe_training_job(TrainingJobName=job_name)
+        model_artifacts = training_job_info['ModelArtifacts']['S3ModelArtifacts']
+        
+        # Create model name
+        model_name = f"model-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Create model in SageMaker
+        sagemaker.create_model(
+            ModelName=model_name,
+            PrimaryContainer={
+                'Image': image_uri,
+                'ModelDataUrl': model_artifacts
+            },
+            ExecutionRoleArn='arn:aws:iam::556417283723:role/accesss3'
+        )
+        
+        # Create endpoint config name
+        endpoint_config_name = f"endpoint-config-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Create endpoint configuration
+        sagemaker.create_endpoint_config(
+            EndpointConfigName=endpoint_config_name,
+            ProductionVariants=[
+                {
+                    'VariantName': 'AllTraffic',
+                    'ModelName': model_name,
+                    'InitialInstanceCount': 1,
+                    'InstanceType': 'ml.t2.medium'
+                }
+            ]
+        )
+        
+        # Create or update endpoint
+        endpoint_name = "my-real-time-endpoint"
+        
+        try:
+            # Check if endpoint exists
+            sagemaker.describe_endpoint(EndpointName=endpoint_name)
+            # If exists, update it
+            sagemaker.update_endpoint(
+                EndpointName=endpoint_name,
+                EndpointConfigName=endpoint_config_name
+            )
+            print(f"Updated endpoint {endpoint_name} with new model")
+        except:
+            # If doesn't exist, create it
+            sagemaker.create_endpoint(
+                EndpointName=endpoint_name,
+                EndpointConfigName=endpoint_config_name
+            )
+            print(f"Created new endpoint {endpoint_name}")
+        
+        # Enhanced endpoint deployment waiting with timeout
+        print(f"Waiting for endpoint {endpoint_name} to be in service...")
+        max_retries = 60  # 60 * 30 seconds = 30 minutes max
+        current_retry = 0
+        endpoint_ready = False
+        
+        while current_retry < max_retries:
+            endpoint_status = sagemaker.describe_endpoint(EndpointName=endpoint_name)['EndpointStatus']
+            if endpoint_status == 'InService':
+                endpoint_ready = True
+                break
+            elif endpoint_status in ['Failed', 'RollbackFailed', 'RollbackComplete']:
+                raise Exception(f"Endpoint deployment failed with status: {endpoint_status}")
+            
+            print(f"Endpoint status: {endpoint_status} - Waiting... (attempt {current_retry + 1}/{max_retries})")
+            sleep(30)  # Wait 30 seconds between checks
+            current_retry += 1
+        
+        if not endpoint_ready:
+            raise Exception("Endpoint deployment timed out after 30 minutes")
+        
+        print(f"Endpoint {endpoint_name} is now InService")
+        
+        # Perform a sample inference
+        runtime = boto3.client('runtime.sagemaker')
+        
+        # Get a sample row from the data (without target)
+        sample_data = data_balanced.drop(columns=['target']).iloc[0:1].values.tolist()[0]
+        
+        # Convert to CSV string
+        payload = ','.join(map(str, sample_data))
+        
+        # Invoke endpoint
+        response = runtime.invoke_endpoint(
+            EndpointName=endpoint_name,
+            ContentType='text/csv',
+            Body=payload
+        )
+        
+        result = response['Body'].read().decode()
+        print(f"Sample inference result: {result}")
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                "message": "Training, deployment and inference completed successfully",
+                "training_job": job_name,
+                "model": model_name,
+                "endpoint": endpoint_name,
+                "sample_inference_result": result
+            })
+        }
+        
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                "error": f"Error in training/deployment process: {str(e)}",
+                "training_job": job_name
+            })
+        }
+
+    
 
