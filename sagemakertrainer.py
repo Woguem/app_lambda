@@ -64,7 +64,7 @@ def lambda_handler(event, context):
         
     # Download new data from S3
     new_obj = s3.get_object(Bucket=bucket, Key=key)
-    new_df = pd.read_csv(new_obj['Body'])
+    new_df = pd.read_csv(new_obj['Body'], sep=",")
 
     # Combine the dataframes
     df = pd.concat([base_df, new_df], ignore_index=True)
@@ -76,8 +76,14 @@ def lambda_handler(event, context):
     
     try:
         # Convert DataFrame to CSV and upload to S3
+        columns = [col for col in data_balanced.columns if col != 'target'] + ['target']
+        data_balanced = data_balanced[columns]
+        data_balanced['target'] = data_balanced['target'].astype(int)
+        print(data_balanced['target'].unique())
+
+        data_balanced = data_balanced.dropna()
         csv_buffer = io.StringIO()
-        data_balanced.to_csv(csv_buffer, index=False)
+        data_balanced.to_csv(csv_buffer, index=False, header=False)
         s3.put_object(Bucket=bucket, Key=balanced_key, Body=csv_buffer.getvalue())
         print(f"Balanced data saved to S3 at {balanced_key}")
     except Exception as e:
@@ -107,7 +113,8 @@ def lambda_handler(event, context):
                         'S3Uri': f's3://{bucket}/{balanced_key}',
                         'S3DataDistributionType': 'FullyReplicated'
                     }
-                }
+                },
+                'ContentType': 'text/csv',   
             }
         ],
         OutputDataConfig={
@@ -125,8 +132,10 @@ def lambda_handler(event, context):
             "max_depth": "5",
             "eta": "0.2",
             "subsample": "0.8",
-            "objective": "binary:logistic",
-            "num_round": "100"
+            "objective": "multi:softmax",
+            "num_class": "4",
+            "num_round": "100",
+            "eval_metric": "mlogloss"
         },
     )
     
