@@ -14,11 +14,13 @@ def balance_data(data):
     
     # Separate features and target variable
     X = data.drop('target', axis=1)
-    y = data['target']
+    y = data['target'].astype(int) 
     
     # Appy SMOTE to balance the dataset
     smote = SMOTE(random_state=42)
     X_res, y_res = smote.fit_resample(X, y)
+    
+    y_res = y_res.astype(int)
     
     # Recreate the DataFrame with balanced data
     balanced_data = pd.DataFrame(X_res, columns=X.columns)
@@ -29,7 +31,7 @@ def balance_data(data):
     return balanced_data
 
 
-# Get the URI for the built-in XGBoost image
+# Get the URI for the built-in  Linear Learner image
 image_uri = image_uris.retrieve(
     framework='xgboost',
     region='eu-west-3',
@@ -76,7 +78,7 @@ def lambda_handler(event, context):
     
     try:
         # Convert DataFrame to CSV and upload to S3
-        columns = [col for col in data_balanced.columns if col != 'target'] + ['target']
+        columns =  ['target'] + [col for col in data_balanced.columns if col != 'target']
         data_balanced = data_balanced[columns]
         data_balanced['target'] = data_balanced['target'].astype(int)
         print(data_balanced['target'].unique())
@@ -136,7 +138,7 @@ def lambda_handler(event, context):
             "num_class": "3",
             "num_round": "100",
             "eval_metric": "mlogloss"
-        },
+        }
     )
     
     # Wait for training job to complete
@@ -217,7 +219,7 @@ def lambda_handler(event, context):
             current_retry += 1
         
         if not endpoint_ready:
-            raise Exception("Endpoint deployment timed out after 30 minutes")
+            raise Exception("Endpoint deployment timed out after 30 seconds")
         
         print(f"Endpoint {endpoint_name} is now InService")
         
